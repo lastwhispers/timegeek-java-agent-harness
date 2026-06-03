@@ -1,20 +1,20 @@
 package com.kaisui.harness.ch04.provider;
 
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import com.kaisui.harness.ch04.schema.Message;
 import com.kaisui.harness.ch04.schema.Role;
 import com.kaisui.harness.ch04.schema.ToolCall;
 import com.kaisui.harness.ch04.schema.ToolDefinition;
+import lombok.extern.slf4j.Slf4j;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -25,18 +25,17 @@ import java.util.concurrent.TimeUnit;
  * Calls the OpenAI-compatible endpoint at DashScope.
  * Requires DASHSCOPE_API_KEY environment variable.
  */
+@Slf4j
 public class DashScopeProvider implements LLMProvider {
 
-    private static final MediaType JSON = MediaType.parse("application/json; charset=utf-8");
+    private static final MediaType JSON_TYPE = MediaType.parse("application/json; charset=utf-8");
 
     private final OkHttpClient client;
     private final String apiKey;
     private final String model;
     private final String baseUrl;
-    private final ObjectMapper mapper;
 
     public DashScopeProvider(String model) {
-//        this(model, "https://token-plan.cn-beijing.maas.aliyuncs.com/v1");
         this(model, "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1");
     }
 
@@ -51,19 +50,19 @@ public class DashScopeProvider implements LLMProvider {
                 .connectTimeout(30, TimeUnit.SECONDS)
                 .readTimeout(120, TimeUnit.SECONDS)
                 .build();
-        this.mapper = new ObjectMapper();
     }
 
     @Override
     public Message generate(List<Message> messages, List<ToolDefinition> availableTools) throws Exception {
-        ObjectNode body = mapper.createObjectNode();
+        JSONObject body = new JSONObject();
         body.put("model", model);
         body.put("max_tokens", 4096);
 
         // Convert messages
-        ArrayNode msgArray = body.putArray("messages");
+        JSONArray msgArray = new JSONArray();
+        body.put("messages", msgArray);
         for (Message msg : messages) {
-            ObjectNode msgNode = msgArray.addObject();
+            JSONObject msgNode = new JSONObject();
             switch (msg.getRole()) {
                 case SYSTEM:
                     msgNode.put("role", "system");
@@ -82,14 +81,17 @@ public class DashScopeProvider implements LLMProvider {
                         msgNode.put("content", msg.getContent());
                     }
                     if (msg.hasToolCalls()) {
-                        ArrayNode tcArray = msgNode.putArray("tool_calls");
+                        JSONArray tcArray = new JSONArray();
+                        msgNode.put("tool_calls", tcArray);
                         for (ToolCall tc : msg.getToolCalls()) {
-                            ObjectNode tcNode = tcArray.addObject();
+                            JSONObject tcNode = new JSONObject();
                             tcNode.put("id", tc.getId());
                             tcNode.put("type", "function");
-                            ObjectNode funcNode = tcNode.putObject("function");
+                            JSONObject funcNode = new JSONObject();
                             funcNode.put("name", tc.getName());
                             funcNode.put("arguments", tc.getArguments());
+                            tcNode.put("function", funcNode);
+                            tcArray.add(tcNode);
                         }
                     }
                     break;
@@ -99,46 +101,47 @@ public class DashScopeProvider implements LLMProvider {
                     msgNode.put("content", msg.getContent());
                     break;
             }
+            msgArray.add(msgNode);
         }
 
         // Convert tool definitions
         if (availableTools != null && !availableTools.isEmpty()) {
-            ArrayNode toolsArray = body.putArray("tools");
+            JSONArray toolsArray = new JSONArray();
+            body.put("tools", toolsArray);
             for (ToolDefinition toolDef : availableTools) {
-                ObjectNode toolNode = toolsArray.addObject();
+                JSONObject toolNode = new JSONObject();
                 toolNode.put("type", "function");
-                ObjectNode funcNode = toolNode.putObject("function");
+                JSONObject funcNode = new JSONObject();
                 funcNode.put("name", toolDef.getName());
                 funcNode.put("description", toolDef.getDescription());
 
-                // Parse input_schema into parameters
                 if (toolDef.getInputSchema() != null) {
-                    JsonNode schemaNode;
                     if (toolDef.getInputSchema() instanceof Map) {
                         @SuppressWarnings("unchecked")
                         Map<String, Object> schemaMap = (Map<String, Object>) toolDef.getInputSchema();
-                        schemaNode = mapper.valueToTree(schemaMap);
+                        funcNode.put("parameters", JSONObject.from(schemaMap));
                     } else {
-                        schemaNode = mapper.readTree(toolDef.getInputSchema().toString());
+                        funcNode.put("parameters", JSON.parse(toolDef.getInputSchema().toString()));
                     }
-                    funcNode.set("parameters", schemaNode);
                 } else {
-                    // Empty schema
-                    ObjectNode emptyParams = funcNode.putObject("parameters");
+                    JSONObject emptyParams = new JSONObject();
                     emptyParams.put("type", "object");
-                    emptyParams.putObject("properties");
+                    emptyParams.put("properties", new JSONObject());
+                    funcNode.put("parameters", emptyParams);
                 }
+                toolNode.put("function", funcNode);
+                toolsArray.add(toolNode);
             }
         }
 
-        String jsonBody = mapper.writeValueAsString(body);
-        System.out.println("[DashScopeProvider] Request body:\n" + jsonBody);
+        String jsonBody = body.toJSONString();
+        log.debug("[DashScopeProvider] Request body: {}", jsonBody);
 
         Request request = new Request.Builder()
                 .url(baseUrl + "/chat/completions")
                 .header("Authorization", "Bearer " + apiKey)
                 .header("Content-Type", "application/json")
-                .post(RequestBody.create(jsonBody, JSON))
+                .post(RequestBody.create(jsonBody, JSON_TYPE))
                 .build();
 
         try (Response response = client.newCall(request).execute()) {
@@ -148,31 +151,35 @@ public class DashScopeProvider implements LLMProvider {
             }
 
             String respBody = response.body().string();
-            JsonNode root = mapper.readTree(respBody);
+            JSONObject root = JSON.parseObject(respBody);
 
-            JsonNode choices = root.get("choices");
+            JSONArray choices = root.getJSONArray("choices");
             if (choices == null || choices.isEmpty()) {
                 throw new RuntimeException("API 返回了空的 choices");
             }
 
-            JsonNode choice = choices.get(0);
-            JsonNode messageNode = choice.get("message");
+            JSONObject messageNode = choices.getJSONObject(0).getJSONObject("message");
 
             Message resultMsg = new Message();
             resultMsg.setRole(Role.ASSISTANT);
 
-            JsonNode contentNode = messageNode.get("content");
-            if (contentNode != null && !contentNode.isNull()) {
-                resultMsg.setContent(contentNode.asText());
+            String content = messageNode.getString("content");
+            if (content != null) {
+                resultMsg.setContent(content);
             }
 
-            JsonNode toolCallsNode = messageNode.get("tool_calls");
-            if (toolCallsNode != null && toolCallsNode.isArray()) {
-                List<ToolCall> toolCalls = new java.util.ArrayList<>();
-                for (JsonNode tcNode : toolCallsNode) {
-                    String id = tcNode.has("id") ? tcNode.get("id").asText() : generateId();
-                    String name = tcNode.path("function").path("name").asText();
-                    String args = tcNode.path("function").path("arguments").asText();
+            JSONArray toolCallsNode = messageNode.getJSONArray("tool_calls");
+            if (toolCallsNode != null && !toolCallsNode.isEmpty()) {
+                List<ToolCall> toolCalls = new ArrayList<>();
+                for (int i = 0; i < toolCallsNode.size(); i++) {
+                    JSONObject tcNode = toolCallsNode.getJSONObject(i);
+                    String id = tcNode.getString("id");
+                    if (id == null) {
+                        id = generateId();
+                    }
+                    JSONObject funcObj = tcNode.getJSONObject("function");
+                    String name = funcObj.getString("name");
+                    String args = funcObj.getString("arguments");
                     toolCalls.add(new ToolCall(id, name, args));
                 }
                 resultMsg.setToolCalls(toolCalls);
