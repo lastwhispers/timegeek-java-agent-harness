@@ -90,13 +90,13 @@ public class AgentEngine {
             contextHistory.add(responseMsg);
             // 如果模型回复了纯文本，打印出来 (这通常是它的思考过程，或是最终结果)
             if (!StringUtils.isEmpty(responseMsg.getContent())) {
-                log.info("🤖 模型: {}\n", responseMsg.getContent());
+                log.info("[对外回复]: {}\n", responseMsg.getContent());
             }
 
             // 3. 退出条件判断
             // 如果模型没有请求任何工具调用，说明它认为任务已经完成，跳出循环。
             if (CollectionUtils.isEmpty(responseMsg.getToolCalls())) {
-                log.info("[Engine] 任务完成，退出循环。");
+                log.info("[Engine] 模型未请求调用工具，任务宣告完成。");
                 break;
             }
 
