@@ -1,28 +1,26 @@
-package com.kaisui.harness.ch04;
+package com.kaisui.harness.ch05;
 
-import com.kaisui.harness.ch04.engine.AgentEngine;
-import com.kaisui.harness.ch04.provider.LLMProvider;
-import com.kaisui.harness.ch04.schema.Message;
-import com.kaisui.harness.ch04.schema.ToolCall;
-import com.kaisui.harness.ch04.schema.ToolDefinition;
-import com.kaisui.harness.ch04.schema.ToolResult;
-import com.kaisui.harness.ch04.tools.Registry;
+import com.kaisui.harness.ch05.engine.AgentEngine;
+import com.kaisui.harness.ch05.provider.LLMProvider;
+import com.kaisui.harness.ch05.schema.ToolCall;
+import com.kaisui.harness.ch05.schema.ToolDefinition;
+import com.kaisui.harness.ch05.schema.ToolResult;
+import com.kaisui.harness.ch05.tools.Registry;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 
-
 // 模拟 Tool Registry
 @Slf4j
-class MockRegistry implements Registry {
+class MockRegistry implements com.kaisui.harness.ch05.tools.Registry {
     @Override
-    public List<ToolDefinition> getAvailableTools() {
+    public List<com.kaisui.harness.ch05.schema.ToolDefinition> getAvailableTools() {
         // Phase 2 需要检测到工具，返回 bash 工具定义
         return List.of(new ToolDefinition("bash", "Execute a shell command", null));
     }
 
     @Override
-    public ToolResult execute(ToolCall call) {
+    public com.kaisui.harness.ch05.schema.ToolResult execute(ToolCall call) {
         log.info("[MockRegistry] 执行工具: {} , 参数: {}", call.getName(), call.getArguments());
         return new ToolResult(
                 call.getId(),
@@ -42,11 +40,11 @@ public class Main {
         LLMProvider provider;
         String dashModel = System.getenv("DASHSCOPE_MODEL");
         log.info("[Main] 使用 DashScope 模型: {}", dashModel);
-        provider = new com.kaisui.harness.ch04.provider.DashScopeProvider(dashModel);
+        provider = new com.kaisui.harness.ch05.provider.DashScopeProvider(dashModel);
 
-        Registry registry = new MockRegistry();
+        Registry registry = new com.kaisui.harness.ch05.MockRegistry();
 
-        AgentEngine engine = new AgentEngine(provider, registry, workDir, true);
+        com.kaisui.harness.ch05.engine.AgentEngine engine = new AgentEngine(provider, registry, workDir, true);
 
         engine.run("帮我检查当前目录的文件");
     }
