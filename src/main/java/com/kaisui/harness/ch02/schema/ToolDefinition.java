@@ -1,16 +1,15 @@
 package com.kaisui.harness.ch02.schema;
 
-import com.fasterxml.jackson.annotation.*;
+import com.alibaba.fastjson2.annotation.JSONField;
 
-@JsonInclude(JsonInclude.Include.NON_NULL)
 public class ToolDefinition {
-    @JsonProperty("name")
+    @JSONField(name = "name")
     private String name;
 
-    @JsonProperty("description")
+    @JSONField(name = "description")
     private String description;
 
-    @JsonProperty("input_schema")
+    @JSONField(name = "input_schema")
     private Object inputSchema;
 
     public ToolDefinition() {}

@@ -1,17 +1,15 @@
 package com.kaisui.harness.ch05.schema;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
+import com.alibaba.fastjson2.annotation.JSONField;
 
-@JsonInclude(JsonInclude.Include.NON_NULL)
 public class ToolResult {
-    @JsonProperty("tool_call_id")
+    @JSONField(name = "tool_call_id")
     private String toolCallId;
 
-    @JsonProperty("output")
+    @JSONField(name = "output")
     private String output;
 
-    @JsonProperty("is_error")
+    @JSONField(name = "is_error")
     private boolean isError;
 
     public ToolResult() {}

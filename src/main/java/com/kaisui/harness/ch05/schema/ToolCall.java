@@ -1,19 +1,15 @@
 package com.kaisui.harness.ch05.schema;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonRawValue;
+import com.alibaba.fastjson2.annotation.JSONField;
 
-@JsonInclude(JsonInclude.Include.NON_NULL)
 public class ToolCall {
-    @JsonProperty("id")
+    @JSONField(name = "id")
     private String id;
 
-    @JsonProperty("name")
+    @JSONField(name = "name")
     private String name;
 
-    @JsonProperty("arguments")
-    @JsonRawValue
+    @JSONField(name = "arguments")
     private String arguments;
 
     public ToolCall() {}

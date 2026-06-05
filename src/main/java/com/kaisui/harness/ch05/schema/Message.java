@@ -1,27 +1,23 @@
 package com.kaisui.harness.ch05.schema;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.annotation.JsonProperty;
+import com.alibaba.fastjson2.annotation.JSONField;
 import lombok.AllArgsConstructor;
 
 import java.util.List;
 
 // 统一的消息与工具调用类型定义
-@JsonInclude(JsonInclude.Include.NON_NULL)
 @AllArgsConstructor
 public class Message {
-    @JsonProperty("role")
+    @JSONField(name = "role")
     private Role role;
 
-    @JsonProperty("content")
+    @JSONField(name = "content")
     private String content;
 
-    @JsonProperty("tool_calls")
-    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JSONField(name = "tool_calls")
     private List<ToolCall> toolCalls;
 
-    @JsonProperty("tool_call_id")
-    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JSONField(name = "tool_call_id")
     private String toolCallId;
 
     public Message() {}

@@ -9,6 +9,9 @@ import java.util.List;
 // 工具注册与分发接口
 // Registry 定义了工具的注册与分发执行接口
 public interface Registry {
+    // Register 将一个工具注册到系统中
+    void register(BaseTool tool);
+
     // GetAvailableTools 返回当前系统挂载的所有可用工具的 Schema
     List<ToolDefinition> getAvailableTools();
 
