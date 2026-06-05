@@ -11,6 +11,6 @@
         <appender-ref ref="STDOUT" />
     </root>
 
-    <logger name="com.kaisui.harness" level="DEBUG" />
+    <logger name="com.lastwhispers.harness" level="DEBUG" />
 
 </configuration>
