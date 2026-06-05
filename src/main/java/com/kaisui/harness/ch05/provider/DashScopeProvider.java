@@ -31,6 +31,10 @@ public class DashScopeProvider implements LLMProvider {
     private final String model;
     private final String baseUrl;
 
+    public DashScopeProvider() {
+        this(resolve("DASHSCOPE_MODEL"));
+    }
+
     public DashScopeProvider(String model) {
         this(model, "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1");
     }
@@ -39,6 +43,9 @@ public class DashScopeProvider implements LLMProvider {
         this.apiKey = resolve("DASHSCOPE_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
             throw new IllegalStateException("请设置 DASHSCOPE_API_KEY 环境变量");
+        }
+        if (model == null || model.isEmpty()) {
+            throw new IllegalStateException("请设置 DASHSCOPE_MODEL 环境变量或在 .env 中配置");
         }
         this.model = model;
         this.baseUrl = baseUrl;

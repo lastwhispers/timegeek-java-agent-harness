@@ -35,14 +35,21 @@ public class DashScopeProvider implements LLMProvider {
     private final String model;
     private final String baseUrl;
 
+    public DashScopeProvider() {
+        this(resolve("DASHSCOPE_MODEL"));
+    }
+
     public DashScopeProvider(String model) {
         this(model, "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1");
     }
 
     public DashScopeProvider(String model, String baseUrl) {
-        this.apiKey = System.getenv("DASHSCOPE_API_KEY");
+        this.apiKey = resolve("DASHSCOPE_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
             throw new IllegalStateException("请设置 DASHSCOPE_API_KEY 环境变量");
+        }
+        if (model == null || model.isEmpty()) {
+            throw new IllegalStateException("请设置 DASHSCOPE_MODEL 环境变量或在 .env 中配置");
         }
         this.model = model;
         this.baseUrl = baseUrl;
@@ -191,5 +198,13 @@ public class DashScopeProvider implements LLMProvider {
 
     private String generateId() {
         return "call_" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    private static String resolve(String key) {
+        String val = System.getenv(key);
+        if (val != null && !val.isEmpty()) {
+            return val;
+        }
+        return System.getProperty(key);
     }
 }

@@ -2,11 +2,11 @@ package com.kaisui.harness.ch04;
 
 import com.kaisui.harness.ch04.engine.AgentEngine;
 import com.kaisui.harness.ch04.provider.LLMProvider;
-import com.kaisui.harness.ch04.schema.Message;
 import com.kaisui.harness.ch04.schema.ToolCall;
 import com.kaisui.harness.ch04.schema.ToolDefinition;
 import com.kaisui.harness.ch04.schema.ToolResult;
 import com.kaisui.harness.ch04.tools.Registry;
+import com.kaisui.harness.util.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -36,13 +36,13 @@ class MockRegistry implements Registry {
 @Slf4j
 public class Main {
     public static void main(String[] args) {
+        // 加载 .env
+        Dotenv.load();
+
         String workDir = System.getProperty("user.dir");
 
-        // 默认使用 MockProvider，设置 DASHSCOPE_MODEL 环境变量切换为真实百炼模型
-        LLMProvider provider;
-        String dashModel = System.getenv("DASHSCOPE_MODEL");
-        log.info("[Main] 使用 DashScope 模型: {}", dashModel);
-        provider = new com.kaisui.harness.ch04.provider.DashScopeProvider(dashModel);
+        // 初始化真实的大脑 (API_KEY 和 MODEL 由 Provider 内部自动加载)
+        LLMProvider provider = new com.kaisui.harness.ch04.provider.DashScopeProvider();
 
         Registry registry = new MockRegistry();
 

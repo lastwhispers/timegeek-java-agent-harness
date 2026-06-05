@@ -16,18 +16,11 @@ public class Main {
         // 加载项目根目录的 .env 文件
         Dotenv.load();
 
-        // 确保设置了 DASHSCOPE_API_KEY（优先环境变量，其次系统属性）
-        String apiKey = System.getProperty("DASHSCOPE_API_KEY");
-        if (apiKey == null || apiKey.isEmpty()) {
-            log.error("请设置 DASHSCOPE_API_KEY 环境变量");
-            return;
-        }
-
         // 1. 获取工作区物理边界
         String workDir = System.getProperty("user.dir");
 
-        // 2. 初始化真实的大脑 (DashScope 智谱 GLM-4.5，OpenAI 兼容接口)
-        LLMProvider llmProvider = new DashScopeProvider("qwen3.7-max");
+        // 2. 初始化真实的大脑 (API_KEY 和 MODEL 由 Provider 内部自动加载)
+        LLMProvider llmProvider = new DashScopeProvider();
 
         // 3. 初始化真实的 Tool Registry
         Registry registry = new RegistryImpl();
