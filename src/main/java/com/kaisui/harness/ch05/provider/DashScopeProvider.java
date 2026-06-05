@@ -36,7 +36,7 @@ public class DashScopeProvider implements LLMProvider {
     }
 
     public DashScopeProvider(String model, String baseUrl) {
-        this.apiKey = System.getenv("DASHSCOPE_API_KEY");
+        this.apiKey = resolve("DASHSCOPE_API_KEY");
         if (apiKey == null || apiKey.isEmpty()) {
             throw new IllegalStateException("请设置 DASHSCOPE_API_KEY 环境变量");
         }
@@ -187,5 +187,14 @@ public class DashScopeProvider implements LLMProvider {
 
     private String generateId() {
         return "call_" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    // 优先读环境变量，其次读系统属性（支持 .env 文件加载的场景）
+    private static String resolve(String key) {
+        String val = System.getenv(key);
+        if (val != null && !val.isEmpty()) {
+            return val;
+        }
+        return System.getProperty(key);
     }
 }
