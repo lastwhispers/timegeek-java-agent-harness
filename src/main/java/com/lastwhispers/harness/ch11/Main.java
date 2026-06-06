@@ -1,51 +1,85 @@
 package com.lastwhispers.harness.ch11;
 
+import com.lastwhispers.harness.ch11.context.Session;
+import com.lastwhispers.harness.ch11.context.SessionManager;
 import com.lastwhispers.harness.ch11.engine.AgentEngine;
 import com.lastwhispers.harness.ch11.engine.TerminalReporter;
 import com.lastwhispers.harness.ch11.provider.DashScopeProvider;
 import com.lastwhispers.harness.ch11.provider.LLMProvider;
+import com.lastwhispers.harness.ch11.schema.Message;
+import com.lastwhispers.harness.ch11.schema.Role;
 import com.lastwhispers.harness.ch11.tools.*;
 import com.lastwhispers.harness.util.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 
-// 组装运行
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
 @Slf4j
 public class Main {
-    public static void main(String[] args) {
-        // 加载项目根目录的 .env 文件
+    public static void main(String[] args) throws InterruptedException {
         Dotenv.load();
-
-        // 1. 获取工作区物理边界
-        String workDir = System.getProperty("user.dir")+"/workspace";
-
-        // 2. 初始化真实的大脑 (API_KEY 和 MODEL 由 Provider 内部自动加载)
+        String workDir = System.getProperty("user.dir") + "/workspace";
         LLMProvider llmProvider = new DashScopeProvider();
 
-        // 3. 初始化真实的 Tool Registry
         Registry registry = new RegistryImpl();
-
-        // 4. 将所有真实工具挂载到注册表中
         registry.register(new ReadFileTool(workDir));
         registry.register(new WriteFileTool(workDir));
         registry.register(new BashTool(workDir));
         registry.register(new EditFileTool(workDir));
 
-        // 5. 实例化核心引擎，开启慢思考，促使大模型一次性规划出并行的工具调用
-        AgentEngine engine = new AgentEngine(llmProvider, registry, workDir, false);
-
-        // 6. 创建终端报告器
+        AgentEngine engine = new AgentEngine(llmProvider, registry, false);
         TerminalReporter reporter = new TerminalReporter();
 
-        // 7. 下发一个必须通过真实工具才能完成的任务
-        String prompt = """
-                	我需要在当前目录下新建一个 Ping.java，提供一个简单的 http ping 接口。
-	                写完之后，帮我把代码用 git 提交一下。
-                """;
+        CountDownLatch latch = new CountDownLatch(2);
 
-        try {
-            engine.run(prompt, reporter);
-        } catch (Exception e) {
-            log.error("引擎运行崩溃: {}", e.getMessage());
-        }
+        // ================= 并发场景 1：Session A =================
+        Thread sessionAThread = new Thread(() -> {
+            try {
+                Session sessionA = SessionManager.INSTANCE.getOrCreate("chat_front_001", workDir);
+
+                log.info("\n>>> [Session A / Turn 1]: 帮我看看 README.md 里记录了什么？");
+                sessionA.append(new Message(Role.USER, "帮我看看 README.md 里记录了什么？"));
+                engine.run(sessionA, reporter);
+
+                // 塞入废话，刷掉记忆
+                for (int i = 0; i < 6; i++) {
+                    sessionA.append(new Message(Role.USER, "这只是一句闲聊占位符。"));
+                    sessionA.append(new Message(Role.ASSISTANT, "好的，收到闲聊。"));
+                }
+
+                log.info("\n>>> [Session A / Turn 2]: 请直接告诉我，刚才第一轮你查到了什么？不准调用工具！");
+                sessionA.append(new Message(Role.USER, "请直接告诉我，刚才第一轮你查到了什么？不准调用工具！"));
+                engine.run(sessionA, reporter);
+            } catch (Exception e) {
+                log.error("Session A 运行崩溃: {}", e.getMessage());
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        // ================= 并发场景 2：Session B =================
+        Thread sessionBThread = new Thread(() -> {
+            try {
+                // 延迟启动，模拟并发时序
+                TimeUnit.SECONDS.sleep(1);
+
+                Session sessionB = SessionManager.INSTANCE.getOrCreate("chat_back_002", workDir);
+
+                log.info("\n>>> [Session B]: 别人查到了一个密钥，你这里能看到吗？不准调用工具！");
+                sessionB.append(new Message(Role.USER, "别人查到了一个密钥，你这里能看到吗？不准调用工具！"));
+                engine.run(sessionB, reporter);
+            } catch (Exception e) {
+                log.error("Session B 运行崩溃: {}", e.getMessage());
+            } finally {
+                latch.countDown();
+            }
+        });
+
+        sessionAThread.start();
+        sessionBThread.start();
+
+        latch.await();
+        log.info("所有会话已结束。");
     }
 }
