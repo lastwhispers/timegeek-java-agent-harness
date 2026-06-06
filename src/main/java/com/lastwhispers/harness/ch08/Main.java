@@ -30,7 +30,7 @@ public class Main {
         registry.register(new EditFileTool(workDir));
 
         // 5. 实例化核心引擎，开启慢思考，促使大模型一次性规划出并行的工具调用
-        AgentEngine engine = new AgentEngine(llmProvider, registry, workDir, true);
+        AgentEngine engine = new AgentEngine(llmProvider, registry, workDir, false);
 
         // 6. 下发一个必须通过真实工具才能完成的任务
         String prompt = """
