@@ -158,6 +158,7 @@ public class DashScopeProvider implements LLMProvider {
             }
 
             String respBody = response.body().string();
+            log.debug("[DashScopeProvider] Response body: {}", respBody);
             JSONObject root = JSON.parseObject(respBody);
 
             JSONArray choices = root.getJSONArray("choices");
