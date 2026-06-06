@@ -3,9 +3,11 @@ package com.lastwhispers.harness.ch02.ch06;
 import com.lastwhispers.harness.ch02.ch06.engine.AgentEngine;
 import com.lastwhispers.harness.ch02.ch06.provider.DashScopeProvider;
 import com.lastwhispers.harness.ch02.ch06.provider.LLMProvider;
+import com.lastwhispers.harness.ch02.ch06.tools.BashTool;
 import com.lastwhispers.harness.ch02.ch06.tools.ReadFileTool;
 import com.lastwhispers.harness.ch02.ch06.tools.Registry;
 import com.lastwhispers.harness.ch02.ch06.tools.RegistryImpl;
+import com.lastwhispers.harness.ch02.ch06.tools.WriteFileTool;
 import com.lastwhispers.harness.ch02.util.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 
@@ -25,15 +27,21 @@ public class Main {
         // 3. 初始化真实的 Tool Registry
         Registry registry = new RegistryImpl();
 
-        // 4. 将真实的 ReadFile 工具挂载到注册表中
-        ReadFileTool readFileTool = new ReadFileTool(workDir);
-        registry.register(readFileTool);
+        // 4. 将所有真实工具挂载到注册表中
+        registry.register(new ReadFileTool(workDir));
+        registry.register(new WriteFileTool(workDir));
+        registry.register(new BashTool(workDir));
 
-        // 5. 实例化核心引擎，由于任务简单，关闭思考阶段 (EnableThinking = false) 以加快速度
+        // 5. 实例化核心引擎，关闭思考阶段 (EnableThinking = false) 以加快速度
         AgentEngine engine = new AgentEngine(llmProvider, registry, workDir, false);
 
         // 6. 下发一个必须通过真实工具才能完成的任务
-        String prompt = "请调用工具读取一下当前工作区目录下 hello.txt 文件的内容，并用一句话向我总结它说了什么。";
+        String prompt = """
+                请帮我执行以下操作：
+                1. 用 bash 查看当前系统的 Java 版本。
+                2. 帮我写一个简单的 HelloWorld.java 文件，输出 "Hello, timegeek-java-agent-harness!"。
+                3. 用 bash 编译并运行这个 Java 文件，确认它能正常工作。
+                """;
 
         try {
             engine.run(prompt);

@@ -64,12 +64,12 @@ public class AgentEngine {
                     // 大模型看不到任何 JSON Schema，被迫只能输出纯文本的思考过程。
                     Message thinkResp = this.llmProvider.generate(contextHistory, null);
                     // 如果模型输出了思考过程，我们将其作为 Assistant 消息追加到上下文中
-                    if (StringUtils.isNoneBlank(thinkResp.getContent())) {
+                    if (StringUtils.isNotBlank(thinkResp.getContent())) {
                         log.info("🧠 [内部思考 Trace]: {}\n", thinkResp.getContent());
                     }
                     contextHistory.add(thinkResp);
                 } catch (Exception e) {
-                    log.error("Thinking 阶段生成失败:" + e.getMessage());
+                    log.error("Thinking 阶段生成失败: {}", e.getMessage());
                     throw new RuntimeException(String.format("Thinking 阶段生成失败: %s", e.getMessage()));
                 }
             }
@@ -84,7 +84,7 @@ public class AgentEngine {
             try {
                 responseMsg = this.llmProvider.generate(contextHistory, availableTools);
             } catch (Exception e) {
-                log.error("模型生成失败:" + e.getMessage());
+                log.error("模型生成失败: {}", e.getMessage());
                 throw new RuntimeException(String.format("模型生成失败: %s", e.getMessage()));
             }
             // 将模型的响应完整追加到上下文历史中
@@ -125,4 +125,3 @@ public class AgentEngine {
     }
 
 }
-
