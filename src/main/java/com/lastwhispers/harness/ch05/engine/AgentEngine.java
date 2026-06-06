@@ -36,7 +36,7 @@ public class AgentEngine {
         // 在真实的场景中，这里会由动态 Prompt 组装器加载 AGENTS.md。目前我们先硬编码。
         Message systemMessage = new Message();
         systemMessage.setRole(Role.SYSTEM);
-        systemMessage.setContent("You are go-tiny-claw, an expert coding assistant. You have full access to tools in the workspace.");
+        systemMessage.setContent("You are java-tiny-claw, an expert coding assistant. You have full access to tools in the workspace.");
 
         Message userMessage = new Message();
         userMessage.setRole(Role.USER);

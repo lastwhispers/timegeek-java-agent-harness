@@ -16,7 +16,7 @@ public class Main {
         Dotenv.load();
 
         // 1. 获取工作区物理边界
-        String workDir = System.getProperty("user.dir");
+        String workDir = System.getProperty("user.dir")+"/workspace";
 
         // 2. 初始化真实的大脑 (API_KEY 和 MODEL 由 Provider 内部自动加载)
         LLMProvider llmProvider = new DashScopeProvider();
@@ -31,7 +31,6 @@ public class Main {
         registry.register(new EditFileTool(workDir));
 
         // 5. 实例化核心引擎，开启慢思考，促使大模型一次性规划出并行的工具调用
-        // 5. 实例化核心引擎，开启慢思考，促使大模型一次性规划出并行的工具调用
         AgentEngine engine = new AgentEngine(llmProvider, registry, workDir, false);
 
         // 6. 创建终端报告器
@@ -39,8 +38,8 @@ public class Main {
 
         // 7. 下发一个必须通过真实工具才能完成的任务
         String prompt = """
-                我当前目录下有 a.txt, b.txt, c.txt 三个文件。(如果没有请忽略找不到的报错)
-                为了节省时间，请你同时一次性利用工具读取这三个文件，并将它们的内容综合起来告诉我。
+                	我需要在当前目录下新建一个 Ping.java，提供一个简单的 http ping 接口。
+	                写完之后，帮我把代码用 git 提交一下。
                 """;
 
         try {
