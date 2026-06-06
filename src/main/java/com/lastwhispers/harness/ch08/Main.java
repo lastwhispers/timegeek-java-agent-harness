@@ -29,17 +29,13 @@ public class Main {
         registry.register(new BashTool(workDir));
         registry.register(new EditFileTool(workDir));
 
-        // 5. 实例化核心引擎，关闭思考阶段 (EnableThinking = false) 以加快速度
-        AgentEngine engine = new AgentEngine(llmProvider, registry, workDir, false);
+        // 5. 实例化核心引擎，开启慢思考，促使大模型一次性规划出并行的工具调用
+        AgentEngine engine = new AgentEngine(llmProvider, registry, workDir, true);
 
         // 6. 下发一个必须通过真实工具才能完成的任务
         String prompt = """
-                我当前目录下有一个 server.java 文件。
-                请帮我把里面 "TODO: 增加鉴权逻辑" 下面的那个 if 语句，整个替换为：
-                if (user == null) {
-                    System.out.println("Forbidden!");
-                    return;
-                }
+                我当前目录下有 a.txt, b.txt, c.txt 三个文件。(如果没有请忽略找不到的报错)
+                为了节省时间，请你同时一次性利用工具读取这三个文件，并将它们的内容综合起来告诉我。
                 """;
 
         try {

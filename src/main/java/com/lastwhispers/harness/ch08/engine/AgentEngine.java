@@ -1,6 +1,5 @@
 package com.lastwhispers.harness.ch08.engine;
 
-
 import com.lastwhispers.harness.ch08.provider.LLMProvider;
 import com.lastwhispers.harness.ch08.schema.*;
 import com.lastwhispers.harness.ch08.tools.Registry;
@@ -12,6 +11,9 @@ import org.apache.commons.lang3.StringUtils;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 @Data
 @AllArgsConstructor
@@ -102,22 +104,52 @@ public class AgentEngine {
             }
 
             // 4. 执行行动 (Action) 与 获取观察结果 (Observation)
-            log.info("[Engine] 模型请求调用 {} 个工具...\n", responseMsg.getToolCalls().size());
+            log.info("[Engine] 模型请求并发调用 {} 个工具...\n", responseMsg.getToolCalls().size());
 
-            for (ToolCall toolCall : responseMsg.getToolCalls()) {
-                log.info(" -> 🛠️ 执行工具: {}, 参数: {}\n", toolCall.getName(), (toolCall.getArguments()));
-                // 通过 Registry 路由并执行底层工具
-                ToolResult toolResult = this.registry.execute(toolCall);
-                if (toolResult.isError()) {
-                    log.info(" -> ❌ 工具执行报错: {}\n", toolResult.getOutput());
-                } else {
-                    log.info(" -> ✅ 工具执行成功 (返回 {} 字节)\n", (toolResult.getOutput().length()));
+            // 核心改造：从串行演进为并行
+            // 预分配固定长度切片，用于安全存放各并发工具的执行结果 (Observation)
+            int callCount = responseMsg.getToolCalls().size();
+            List<Message> observationMsgs = new ArrayList<>(callCount);
+            for (int i = 0; i < callCount; i++) {
+                observationMsgs.add(null);
+            }
+
+            // 使用虚拟线程线程池执行并发工具调用 (Java 21+)
+            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+                for (int i = 0; i < callCount; i++) {
+                    final int idx = i;
+                    final ToolCall call = responseMsg.getToolCalls().get(i);
+
+                    CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                        log.info("  -> [Thread-{}] 🛠️ 触发并行执行: {}\n", idx, call.getName());
+
+                        // 调用底层 Registry 执行工具（物理操作）
+                        ToolResult result = this.registry.execute(call);
+
+                        if (result.isError()) {
+                            log.info("  -> [Thread-{}] ❌ 工具执行报错: {}\n", idx, result.getOutput());
+                        } else {
+                            log.info("  -> [Thread-{}] ✅ 工具执行成功 (返回 {} 字节)\n", idx, result.getOutput().length());
+                        }
+
+                        // 线程安全：每个线程操作预分配列表的不同索引，无需加锁
+                        observationMsgs.set(idx, new Message(Role.USER, result.getOutput(), call.getId()));
+                    }, executor);
+
+                    futures.add(future);
                 }
-                // 将工具执行的观察结果 (Observation) 封装为 User Message 追加到上下文中
-                // 注意：ToolCallID 必须携带！这是维系大模型推理链条的关键
-                Message observationMsg = new Message(Role.USER, toolResult.getOutput(), toolCall.getId());
-                contextHistory.add(observationMsg);
 
+                // Join 阻塞等待：主循环挂起，直到所有并发任务全部执行完毕
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            }
+
+            log.info("[Engine] 所有并发工具执行完毕，开始聚合观察结果 (Observation)...\n");
+
+            // 按序追加回 Context
+            for (Message obs : observationMsgs) {
+                contextHistory.add(obs);
             }
 
             // 循环回到开头，模型将带着新加入的 Observation 继续它的下一轮思考...
