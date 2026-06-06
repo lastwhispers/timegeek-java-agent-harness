@@ -1,5 +1,6 @@
 package com.lastwhispers.harness.ch10.engine;
 
+import com.lastwhispers.harness.ch10.context.PromptComposer;
 import com.lastwhispers.harness.ch10.provider.LLMProvider;
 import com.lastwhispers.harness.ch10.schema.*;
 import com.lastwhispers.harness.ch10.tools.Registry;
@@ -27,17 +28,20 @@ public class AgentEngine {
     private Registry registry;
     // 工作区
     private String workDir;
-    // 【新增】慢思考模式开关
+    // 慢思考模式开关
     private Boolean enableThinking;
 
     public void run(String userPrompt) {
+        run(userPrompt, null);
+    }
+
+    public void run(String userPrompt, Reporter reporter) {
         log.info("[Engine] 引擎启动，锁定工作区: {}\n", this.workDir);
         log.info("[Engine] 慢思考模式 (Thinking Phase): {}\n", this.enableThinking);
-        // 1. 初始化会话的 Context (上下文内存)
-        // 在真实的场景中，这里会由动态 Prompt 组装器加载 AGENTS.md。目前我们先硬编码。
-        Message systemMessage = new Message();
-        systemMessage.setRole(Role.SYSTEM);
-        systemMessage.setContent("You are go-tiny-claw, an expert coding assistant. You have full access to tools in the workspace.");
+
+        // 【核心修改】动态组装 System Prompt
+        PromptComposer composer = new PromptComposer(workDir);
+        Message systemMessage = composer.build();
 
         Message userMessage = new Message();
         userMessage.setRole(Role.USER);
@@ -60,14 +64,17 @@ public class AgentEngine {
             // ====================================================================
 
             if (this.enableThinking) {
+                if (reporter != null) {
+                    reporter.onThinking();
+                }
                 try {
                     log.info("[Engine][Phase 1] 剥夺工具访问权，强制进入慢思考与规划阶段...");
-                    // 核心机制：传入的 availableTools 为 nil！
+                    // 核心机制：传入的 availableTools 为 null！
                     // 大模型看不到任何 JSON Schema，被迫只能输出纯文本的思考过程。
                     Message thinkResp = this.llmProvider.generate(contextHistory, null);
                     // 如果模型输出了思考过程，我们将其作为 Assistant 消息追加到上下文中
                     if (StringUtils.isNotBlank(thinkResp.getContent())) {
-                        log.info("🧠 [内部思考 Trace]: {}\n", thinkResp.getContent());
+                        log.info("[内部思考 Trace]: {}\n", thinkResp.getContent());
                     }
                     contextHistory.add(thinkResp);
                 } catch (Exception e) {
@@ -93,7 +100,11 @@ public class AgentEngine {
             contextHistory.add(responseMsg);
             // 如果模型回复了纯文本，打印出来 (这通常是它的思考过程，或是最终结果)
             if (!StringUtils.isEmpty(responseMsg.getContent())) {
-                log.info("[对外回复]: {}\n", responseMsg.getContent());
+                if (reporter != null) {
+                    reporter.onMessage(responseMsg.getContent());
+                } else {
+                    log.info("[对外回复]: {}\n", responseMsg.getContent());
+                }
             }
 
             // 3. 退出条件判断
@@ -123,10 +134,21 @@ public class AgentEngine {
                     final ToolCall call = responseMsg.getToolCalls().get(i);
 
                     CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                        if (reporter != null) {
+                            reporter.onToolCall(call.getName(), call.getArguments());
+                        }
                         log.info("  -> [Thread-{}] 🛠️ 触发并行执行: {}\n", idx, call.getName());
 
                         // 调用底层 Registry 执行工具（物理操作）
                         ToolResult result = this.registry.execute(call);
+
+                        if (reporter != null) {
+                            String displayOutput = result.getOutput();
+                            if (displayOutput.length() > 200) {
+                                displayOutput = displayOutput.substring(0, 200) + "... (已截断)";
+                            }
+                            reporter.onToolResult(call.getName(), displayOutput, result.isError());
+                        }
 
                         if (result.isError()) {
                             log.info("  -> [Thread-{}] ❌ 工具执行报错: {}\n", idx, result.getOutput());
@@ -155,5 +177,4 @@ public class AgentEngine {
             // 循环回到开头，模型将带着新加入的 Observation 继续它的下一轮思考...
         }
     }
-
 }

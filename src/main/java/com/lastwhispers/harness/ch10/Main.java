@@ -1,6 +1,7 @@
 package com.lastwhispers.harness.ch10;
 
 import com.lastwhispers.harness.ch10.engine.AgentEngine;
+import com.lastwhispers.harness.ch10.engine.TerminalReporter;
 import com.lastwhispers.harness.ch10.provider.DashScopeProvider;
 import com.lastwhispers.harness.ch10.provider.LLMProvider;
 import com.lastwhispers.harness.ch10.tools.*;
@@ -30,16 +31,20 @@ public class Main {
         registry.register(new EditFileTool(workDir));
 
         // 5. 实例化核心引擎，开启慢思考，促使大模型一次性规划出并行的工具调用
+        // 5. 实例化核心引擎，开启慢思考，促使大模型一次性规划出并行的工具调用
         AgentEngine engine = new AgentEngine(llmProvider, registry, workDir, false);
 
-        // 6. 下发一个必须通过真实工具才能完成的任务
+        // 6. 创建终端报告器
+        TerminalReporter reporter = new TerminalReporter();
+
+        // 7. 下发一个必须通过真实工具才能完成的任务
         String prompt = """
                 我当前目录下有 a.txt, b.txt, c.txt 三个文件。(如果没有请忽略找不到的报错)
                 为了节省时间，请你同时一次性利用工具读取这三个文件，并将它们的内容综合起来告诉我。
                 """;
 
         try {
-            engine.run(prompt);
+            engine.run(prompt, reporter);
         } catch (Exception e) {
             log.error("引擎运行崩溃: {}", e.getMessage());
         }
