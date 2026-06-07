@@ -1,5 +1,6 @@
 package com.lastwhispers.harness.ch12;
 
+import com.lastwhispers.harness.ch12.context.ContextCompactor;
 import com.lastwhispers.harness.ch12.context.Session;
 import com.lastwhispers.harness.ch12.context.SessionManager;
 import com.lastwhispers.harness.ch12.engine.AgentEngine;
@@ -12,74 +13,43 @@ import com.lastwhispers.harness.ch12.tools.*;
 import com.lastwhispers.harness.util.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-
 @Slf4j
 public class Main {
-    public static void main(String[] args) throws InterruptedException {
+    public static void main(String[] args) {
         Dotenv.load();
-        String workDir = System.getProperty("user.dir") + "/workspace";
+
+        String workDir = System.getProperty("user.dir") + "/workspace/ch12";
         LLMProvider llmProvider = new DashScopeProvider();
 
         Registry registry = new RegistryImpl();
         registry.register(new ReadFileTool(workDir));
         registry.register(new WriteFileTool(workDir));
         registry.register(new BashTool(workDir));
-        registry.register(new EditFileTool(workDir));
 
-        AgentEngine engine = new AgentEngine(llmProvider, registry, false);
+        // 实例化引擎，传入一个极小的 Compactor 阈值 (8000 字符) 用于测试 OOM 防护机制
+        ContextCompactor compactor = new ContextCompactor(8000, 6);
+        AgentEngine engine = new AgentEngine(llmProvider, registry, false, compactor);
         TerminalReporter reporter = new TerminalReporter();
 
-        CountDownLatch latch = new CountDownLatch(2);
+        String sessionID = "test_oom_protection_001";
+        Session session = SessionManager.INSTANCE.getOrCreate(sessionID, workDir);
 
-        // ================= 并发场景 1：Session A =================
-        Thread sessionAThread = new Thread(() -> {
-            try {
-                Session sessionA = SessionManager.INSTANCE.getOrCreate("chat_front_001", workDir);
+        // 发起一个会导致读取大文件的恶意任务
+        String prompt = """
+            请帮我执行以下三个步骤：
+            1. 使用 bash 执行 echo "开始排查日志"
+            2. 使用 read_file 工具读取当前目录下的巨大文件 mock_log.txt
+            3. 使用 bash 执行 date 命令获取当前时间，并告诉我任务全部完成。
+            """;
 
-                log.info("\n>>> [Session A / Turn 1]: 帮我看看 README.md 里记录了什么？");
-                sessionA.append(new Message(Role.USER, "帮我看看 README.md 里记录了什么？"));
-                engine.run(sessionA, reporter);
+        session.append(new Message(Role.USER, prompt));
 
-                // 塞入废话，刷掉记忆
-                for (int i = 0; i < 6; i++) {
-                    sessionA.append(new Message(Role.USER, "这只是一句闲聊占位符。"));
-                    sessionA.append(new Message(Role.ASSISTANT, "好的，收到闲聊。"));
-                }
+        try {
+            engine.run(session, reporter);
+        } catch (Exception e) {
+            log.error("引擎运行崩溃: {}", e.getMessage(), e);
+        }
 
-                log.info("\n>>> [Session A / Turn 2]: 请直接告诉我，刚才第一轮你查到了什么？不准调用工具！");
-                sessionA.append(new Message(Role.USER, "请直接告诉我，刚才第一轮你查到了什么？不准调用工具！"));
-                engine.run(sessionA, reporter);
-            } catch (Exception e) {
-                log.error("Session A 运行崩溃: {}", e.getMessage());
-            } finally {
-                latch.countDown();
-            }
-        });
-
-        // ================= 并发场景 2：Session B =================
-        Thread sessionBThread = new Thread(() -> {
-            try {
-                // 延迟启动，模拟并发时序
-                TimeUnit.SECONDS.sleep(1);
-
-                Session sessionB = SessionManager.INSTANCE.getOrCreate("chat_back_002", workDir);
-
-                log.info("\n>>> [Session B]: 别人查到了一个密钥，你这里能看到吗？不准调用工具！");
-                sessionB.append(new Message(Role.USER, "别人查到了一个密钥，你这里能看到吗？不准调用工具！"));
-                engine.run(sessionB, reporter);
-            } catch (Exception e) {
-                log.error("Session B 运行崩溃: {}", e.getMessage());
-            } finally {
-                latch.countDown();
-            }
-        });
-
-        sessionAThread.start();
-        sessionBThread.start();
-
-        latch.await();
-        log.info("所有会话已结束。");
+        log.info("会话已结束。");
     }
 }

@@ -1,5 +1,6 @@
 package com.lastwhispers.harness.ch12.engine;
 
+import com.lastwhispers.harness.ch12.context.ContextCompactor;
 import com.lastwhispers.harness.ch12.context.PromptComposer;
 import com.lastwhispers.harness.ch12.context.Session;
 import com.lastwhispers.harness.ch12.provider.LLMProvider;
@@ -28,11 +29,17 @@ public class AgentEngine {
     private final LLMProvider llmProvider;
     private final Registry registry;
     private final boolean enableThinking;
+    private final ContextCompactor compactor;
 
     public AgentEngine(LLMProvider llmProvider, Registry registry, boolean enableThinking) {
+        this(llmProvider, registry, enableThinking, new ContextCompactor(80000, 6));
+    }
+
+    public AgentEngine(LLMProvider llmProvider, Registry registry, boolean enableThinking, ContextCompactor compactor) {
         this.llmProvider = llmProvider;
         this.registry = registry;
         this.enableThinking = enableThinking;
+        this.compactor = compactor;
     }
 
     /**
@@ -63,7 +70,8 @@ public class AgentEngine {
                     reporter.onThinking();
                 }
                 try {
-                    Message thinkResp = this.llmProvider.generate(contextHistory, null);
+                    List<Message> compactedContext = this.compactor.compact(contextHistory);
+                    Message thinkResp = this.llmProvider.generate(compactedContext, null);
                     if (thinkResp != null && StringUtils.isNotBlank(thinkResp.getContent())) {
                         // 将思考过程持久化到 Session 中！
                         session.append(thinkResp);
@@ -78,7 +86,8 @@ public class AgentEngine {
             // 3. ================= Phase 2: Action =================
             Message actionResp;
             try {
-                actionResp = this.llmProvider.generate(contextHistory, availableTools);
+                List<Message> compactedContext = this.compactor.compact(contextHistory);
+                actionResp = this.llmProvider.generate(compactedContext, availableTools);
             } catch (Exception e) {
                 throw new RuntimeException("Action 阶段生成失败: " + e.getMessage(), e);
             }
