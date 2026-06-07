@@ -14,22 +14,14 @@ import com.lastwhispers.harness.util.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 【修改】下发长程任务，并开启 Plan Mode 测试
+ * 【修改】编写一个会诱发错误的测试指令，验证自愈机制
  */
 @Slf4j
 public class Main {
     public static void main(String[] args) {
-        // 通过命令行参数接收用户的 prompt
-//        String prompt = parsePrompt(args);
-        String prompt = "我需要你搭建一个极简的 Java 语言 Web Server 项目。";
-        if (prompt == null || prompt.isEmpty()) {
-            log.info("用法: java Main -prompt \"你的任务指令\"");
-            System.exit(1);
-        }
-
         Dotenv.load();
 
-        String workDir = System.getProperty("user.dir") + "/workspace/ch13";
+        String workDir = System.getProperty("user.dir") + "/workspace/ch14";
         LLMProvider llmProvider = new DashScopeProvider();
 
         // 挂载 4 大基础工具
@@ -39,18 +31,32 @@ public class Main {
         registry.register(new BashTool(workDir));
         registry.register(new EditFileTool(workDir));
 
-        // 实例化引擎并开启计划模式 (PlanMode=true)
+        // 关闭 Plan 模式，专注于见证它改变主意的单点纠偏过程
         ContextCompactor compactor = new ContextCompactor(80000, 6);
-        AgentEngine engine = new AgentEngine(llmProvider, registry, false, true, compactor);
+        AgentEngine engine = new AgentEngine(llmProvider, registry, false, false, compactor);
         TerminalReporter reporter = new TerminalReporter();
 
-        // 使用一个固定的 SessionID，以便在多次运行之间共享基于内存的"短期工作记忆"。
-        // (在真实的 CLI 中，如果进程重启，Session 的内存历史其实是丢失的。
-        //  但这正是要演示的重点：即便短期内存丢失，只要 TODO.md 还在，任务就能继续！)
-        String sessionID = "task_web_server_01";
+        String sessionID = "test_recovery_001";
         Session session = SessionManager.INSTANCE.getOrCreate(sessionID, workDir);
 
-        log.info("\n>>> 收到指令: {}", prompt);
+        // 这是一个巨大的陷阱指令：
+        // 我们不给它查看文件的机会，直接命令它凭初始上下文去修改文件，目的是诱发 old_text 不匹配的错误。
+        String prompt = """
+                我当前目录下有一个 auth.go 文件。
+                请修改 auth.go 中的 login 函数。
+                请直接使用 edit_file 工具替换下面的代码块，将判断条件改为同时允许"admin"、"root"和"guest"这三种用户登录：
+
+                    // 鉴权入口函数
+                    func login(user string) bool {
+                        // 检查用户名
+                        if user == "admin" {
+                            return true
+                        }
+                        return false
+                    }
+                """;
+
+        log.info("\n>>> 启动自愈测试任务...");
 
         // 将用户的 Prompt 压入 Session
         session.append(new Message(Role.USER, prompt));
@@ -63,17 +69,5 @@ public class Main {
         }
 
         log.info("会话已结束。");
-    }
-
-    /**
-     * 简单的命令行参数解析，支持 -prompt "xxx" 格式
-     */
-    private static String parsePrompt(String[] args) {
-        for (int i = 0; i < args.length; i++) {
-            if ("-prompt".equals(args[i]) && i + 1 < args.length) {
-                return args[i + 1];
-            }
-        }
-        return null;
     }
 }

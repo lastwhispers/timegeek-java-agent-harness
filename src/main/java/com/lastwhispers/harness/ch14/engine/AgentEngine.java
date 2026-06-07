@@ -2,6 +2,7 @@ package com.lastwhispers.harness.ch14.engine;
 
 import com.lastwhispers.harness.ch14.context.ContextCompactor;
 import com.lastwhispers.harness.ch14.context.PromptComposer;
+import com.lastwhispers.harness.ch14.context.RecoveryManager;
 import com.lastwhispers.harness.ch14.context.Session;
 import com.lastwhispers.harness.ch14.provider.LLMProvider;
 import com.lastwhispers.harness.ch14.schema.*;
@@ -29,8 +30,9 @@ public class AgentEngine {
     private final LLMProvider llmProvider;
     private final Registry registry;
     private final boolean enableThinking;
-    private final boolean planMode; // 【新增】计划模式开关
+    private final boolean planMode; // 计划模式开关
     private final ContextCompactor compactor;
+    private final RecoveryManager recovery; // 自愈管理器
 
     public AgentEngine(LLMProvider llmProvider, Registry registry, boolean enableThinking) {
         this(llmProvider, registry, enableThinking, false);
@@ -46,6 +48,7 @@ public class AgentEngine {
         this.enableThinking = enableThinking;
         this.planMode = planMode;
         this.compactor = compactor;
+        this.recovery = new RecoveryManager();
     }
 
     /**
@@ -142,21 +145,25 @@ public class AgentEngine {
 
                         ToolResult result = this.registry.execute(call);
 
+                        // 发生错误，交由 RecoveryManager 诊断并注入"锦囊妙计"
+                        String finalOutput = result.getOutput();
+                        if (result.isError()) {
+                            finalOutput = this.recovery.analyzeAndInject(call.getName(), result.getOutput());
+                            log.info("  -> [Thread-{}] 注入救援指南: {}", idx, finalOutput);
+                        } else {
+                            log.info("  -> [Thread-{}] 工具执行成功 (返回 {} 字节)", idx, result.getOutput().length());
+                        }
+
                         if (reporter != null) {
-                            String displayOutput = result.getOutput();
+                            String displayOutput = finalOutput;
                             if (displayOutput.length() > 200) {
                                 displayOutput = displayOutput.substring(0, 200) + "... (已截断)";
                             }
                             reporter.onToolResult(call.getName(), displayOutput, result.isError());
                         }
 
-                        if (result.isError()) {
-                            log.info("  -> [Thread-{}] 工具执行报错: {}", idx, result.getOutput());
-                        } else {
-                            log.info("  -> [Thread-{}] 工具执行成功 (返回 {} 字节)", idx, result.getOutput().length());
-                        }
-
-                        observationMsgs.set(idx, new Message(Role.USER, result.getOutput(), call.getId()));
+                        // 将注入过 Recovery Hint 的最终结果写入上下文历史
+                        observationMsgs.set(idx, new Message(Role.USER, finalOutput, call.getId()));
                     }, executor);
 
                     futures.add(future);
