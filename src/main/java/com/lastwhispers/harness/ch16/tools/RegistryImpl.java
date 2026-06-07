@@ -14,6 +14,7 @@ import java.util.Map;
 public class RegistryImpl implements Registry {
 
     private final Map<String, BaseTool> tools = new HashMap<>();
+    private final List<MiddlewareFunc> middlewares = new ArrayList<>();
 
     @Override
     public void register(BaseTool tool) {
@@ -23,6 +24,11 @@ public class RegistryImpl implements Registry {
         }
         tools.put(name, tool);
         log.info("[Registry] 成功挂载工具: {}", name);
+    }
+
+    @Override
+    public void use(MiddlewareFunc middleware) {
+        middlewares.add(middleware);
     }
 
     @Override
@@ -42,8 +48,18 @@ public class RegistryImpl implements Registry {
             String errMsg = String.format("Error: 系统中不存在名为 '%s' 的工具。", call.getName());
             return new ToolResult(call.getId(), errMsg, true);
         }
-        // 2. 执行工具逻辑：将原始的 JSON 字节流直接丢给具体工具
-        // 3. 封装结果：将执行结果或底层物理错误封装后返回给 Main Loop
+
+        // 2. 【核心防御】在执行底层逻辑前，依次运行所有的 Middleware
+        for (MiddlewareFunc mw : middlewares) {
+            Registry.MiddlewareResult result = mw.apply(call);
+            if (!result.allowed()) {
+                log.info("[Registry] ⚠️ 工具 {} 被 Middleware 拦截: {}", call.getName(), result.rejectReason());
+                return new ToolResult(call.getId(),
+                        "执行被系统拦截。原因: " + result.rejectReason(), true);
+            }
+        }
+
+        // 3. 执行工具逻辑（如果所有 Middleware 都放行了）
         try {
             String output = tool.execute(call.getArguments());
             return new ToolResult(call.getId(), output, false);
