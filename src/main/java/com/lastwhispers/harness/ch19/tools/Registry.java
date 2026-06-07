@@ -1,5 +1,6 @@
 package com.lastwhispers.harness.ch19.tools;
 
+import com.lastwhispers.harness.ch19.observability.Trace;
 import com.lastwhispers.harness.ch19.schema.ToolCall;
 import com.lastwhispers.harness.ch19.schema.ToolDefinition;
 import com.lastwhispers.harness.ch19.schema.ToolResult;
@@ -28,7 +29,17 @@ public interface Registry {
     /**
      * 实际执行模型请求的工具，并返回结果
      */
-    ToolResult execute(ToolCall call);
+    default ToolResult execute(ToolCall call) {
+        return execute(call, null);
+    }
+
+    /**
+     * 实际执行模型请求的工具，并返回结果。
+     *
+     * @param call       工具调用
+     * @param parentSpan 父 Span，用于链路追踪埋点
+     */
+    ToolResult execute(ToolCall call, Trace.Span parentSpan);
 
     /**
      * 中间件函数式接口。

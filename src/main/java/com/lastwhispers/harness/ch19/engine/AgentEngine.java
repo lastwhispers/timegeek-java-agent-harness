@@ -4,6 +4,7 @@ import com.lastwhispers.harness.ch19.context.ContextCompactor;
 import com.lastwhispers.harness.ch19.context.PromptComposer;
 import com.lastwhispers.harness.ch19.context.RecoveryManager;
 import com.lastwhispers.harness.ch19.context.Session;
+import com.lastwhispers.harness.ch19.observability.Trace;
 import com.lastwhispers.harness.ch19.provider.LLMProvider;
 import com.lastwhispers.harness.ch19.schema.*;
 import com.lastwhispers.harness.ch19.tools.Registry;
@@ -60,20 +61,46 @@ public class AgentEngine implements AgentRunner {
     public void run(Session session, Reporter reporter) {
         log.info("[Engine] 唤醒会话 [{}]，锁定工作区: {}", session.getId(), session.getWorkDir());
 
+        // 【埋点 1】开启 Root Span，记录整个任务的生命周期
+        Trace.Span rootSpan = Trace.startSpan(null, "Agent.Run");
+        rootSpan.addAttribute("SessionID", session.getId());
+        rootSpan.addAttribute("WorkDir", session.getWorkDir());
+
+        try {
+            doRun(session, reporter, rootSpan);
+        } catch (Exception e) {
+            rootSpan.addAttribute("error", e.getMessage());
+            throw e;
+        } finally {
+            // defer 保证在引擎退出时，无论成功失败，都能结束根 Span 并导出 Trace 报告
+            rootSpan.endSpan();
+            Trace.exportToFile(rootSpan, session.getWorkDir(), session.getId());
+            log.info("[Tracing] 本次任务的执行回放链路已保存至工作区的 .claw/traces 目录下");
+        }
+    }
+
+    private void doRun(Session session, Reporter reporter, Trace.Span rootSpan) {
         // 根据当前 Session 的工作区，动态组装最新的 System Prompt
         PromptComposer composer = new PromptComposer(session.getWorkDir(), this.planMode);
         Message systemMsg = composer.build();
 
+        int turnCount = 0;
         while (true) {
+            turnCount++;
+            // 【埋点 2】记录单次 Turn 循环
+            Trace.Span turnSpan = Trace.startSpan(rootSpan, "Turn-" + turnCount);
+
             List<ToolDefinition> availableTools = this.registry.getAvailableTools();
 
             // 1. 【上下文组装】：System Prompt + 截取最近的 6 条消息作为 Working Memory
-            // 在实际业务中，由于工具返回结果可能很长，短期工作记忆往往设为 6-10 条足以维系连贯对话
             List<Message> workingMemory = session.getWorkingMemory(DEFAULT_WORKING_MEMORY_LIMIT);
 
             List<Message> contextHistory = new ArrayList<>();
             contextHistory.add(systemMsg);
             contextHistory.addAll(workingMemory);
+
+            List<Message> compactedBeforeThinking = this.compactor.compact(contextHistory);
+            turnSpan.addAttribute("context_message_count", compactedBeforeThinking.size());
 
             // 用于存放本轮 Turn 合并后的思考内容
             String currentTurnThinkingContent = "";
@@ -84,12 +111,13 @@ public class AgentEngine implements AgentRunner {
                     reporter.onThinking();
                 }
                 try {
-                    List<Message> compactedContext = this.compactor.compact(contextHistory);
-                    Message thinkResp = this.llmProvider.generate(compactedContext, null);
+                    // 【埋点 3】记录 Thinking 调用
+                    Trace.Span thinkSpan = Trace.startSpan(turnSpan, "LLM.Thinking");
+                    Message thinkResp = this.llmProvider.generate(compactedBeforeThinking, null);
+                    thinkSpan.endSpan();
+
                     if (thinkResp != null && StringUtils.isNotBlank(thinkResp.getContent())) {
-                        // 【修改点】：思考内容暂存，先不 Append 到 session
                         currentTurnThinkingContent = thinkResp.getContent();
-                        // 为了让 Phase 2 能看到刚才的思考，临时加入 contextHistory
                         contextHistory.add(thinkResp);
                     }
                 } catch (Exception e) {
@@ -100,8 +128,11 @@ public class AgentEngine implements AgentRunner {
             // 3. ================= Phase 2: Action =================
             Message actionResp;
             try {
-                List<Message> compactedContext = this.compactor.compact(contextHistory);
-                actionResp = this.llmProvider.generate(compactedContext, availableTools);
+                List<Message> compactedBeforeAction = this.compactor.compact(contextHistory);
+                // 【埋点 4】记录 Action 调用
+                Trace.Span actSpan = Trace.startSpan(turnSpan, "LLM.Action");
+                actionResp = this.llmProvider.generate(compactedBeforeAction, availableTools);
+                actSpan.endSpan();
             } catch (Exception e) {
                 throw new RuntimeException("Action 阶段生成失败: " + e.getMessage(), e);
             }
@@ -112,7 +143,7 @@ public class AgentEngine implements AgentRunner {
             finalAssistantMsg.setRole(Role.ASSISTANT);
             finalAssistantMsg.setContent(mergedContent);
             finalAssistantMsg.setToolCalls(actionResp.getToolCalls());
-            finalAssistantMsg.setUsage(actionResp.getUsage()); // 【新增】将 Token 用量信息透传到 Session
+            finalAssistantMsg.setUsage(actionResp.getUsage());
 
             // 将合并后的合规消息持久化到 Session 中
             session.append(finalAssistantMsg);
@@ -123,7 +154,6 @@ public class AgentEngine implements AgentRunner {
             }
 
             if (CollectionUtils.isEmpty(actionResp.getToolCalls())) {
-                // 如果没有工具调用，说明本次任务已完成，打破 ReAct 循环，挂起等待人类的下一条指令
                 break;
             }
 
@@ -150,7 +180,8 @@ public class AgentEngine implements AgentRunner {
                             reporter.onToolCall(call.getName(), call.getArguments());
                         }
 
-                        ToolResult result = this.registry.execute(call);
+                        // 【埋点 5】传入 turnSpan 作为父 Span，多个工具的 Span 会平行挂在 Turn 节点下
+                        ToolResult result = this.registry.execute(call, turnSpan);
 
                         // 发生错误，交由 RecoveryManager 诊断并注入"锦囊妙计"
                         String finalOutput = result.getOutput();
@@ -169,7 +200,6 @@ public class AgentEngine implements AgentRunner {
                             reporter.onToolResult(call.getName(), displayOutput, result.isError());
                         }
 
-                        // 将注入过 Recovery Hint 的最终结果写入上下文历史
                         observationMsgs.set(idx, new Message(Role.USER, finalOutput, call.getId()));
 
                         if (idx == 0) {
@@ -191,6 +221,8 @@ public class AgentEngine implements AgentRunner {
             if (reminderMsg != null) {
                 session.append(reminderMsg);
             }
+
+            turnSpan.endSpan();
         }
     }
 
