@@ -1,0 +1,73 @@
+{
+	"name":"Agent.Run",
+	"start_time":"2026-06-07T16:03:16.564002Z",
+	"end_time":"2026-06-07T16:03:24.446583Z",
+	"duration_ms":7882,
+	"attributes":{
+		"WorkDir":"/Users/kaisui/workspace/ai/timegeek-java-agent-harness/timegeek-java-agent-harness/workspace/ch19",
+		"SessionID":"test_trace_001"
+	},
+	"children":[
+		{
+			"name":"Turn-1",
+			"start_time":"2026-06-07T16:03:16.564652Z",
+			"end_time":"2026-06-07T16:03:21.406261Z",
+			"duration_ms":4841,
+			"attributes":{
+				"context_message_count":2
+			},
+			"children":[
+				{
+					"name":"LLM.Action",
+					"start_time":"2026-06-07T16:03:16.565758Z",
+					"end_time":"2026-06-07T16:03:19.357456Z",
+					"duration_ms":2791,
+					"attributes":{
+						
+					}
+				},
+				{
+					"name":"Tool.write_file",
+					"start_time":"2026-06-07T16:03:19.371256Z",
+					"end_time":"2026-06-07T16:03:19.385431Z",
+					"duration_ms":14,
+					"attributes":{
+						"tool_name":"write_file",
+						"arguments":"{\"path\": \"trace_test.md\", \"content\": \"测试并发的写入\"}",
+						"output_preview":"成功将内容写入到文件: trace_test.md"
+					}
+				},
+				{
+					"name":"Tool.bash",
+					"start_time":"2026-06-07T16:03:19.371673Z",
+					"end_time":"2026-06-07T16:03:21.403202Z",
+					"duration_ms":2031,
+					"attributes":{
+						"tool_name":"bash",
+						"arguments":"{\"command\": \"sleep 2 && echo \\\"系统环境检查完毕\\\"\"}",
+						"output_preview":"系统环境检查完毕\n"
+					}
+				}
+			]
+		},
+		{
+			"name":"Turn-2",
+			"start_time":"2026-06-07T16:03:21.406452Z",
+			"duration_ms":0,
+			"attributes":{
+				"context_message_count":5
+			},
+			"children":[
+				{
+					"name":"LLM.Action",
+					"start_time":"2026-06-07T16:03:21.406537Z",
+					"end_time":"2026-06-07T16:03:24.446201Z",
+					"duration_ms":3039,
+					"attributes":{
+						
+					}
+				}
+			]
+		}
+	]
+}

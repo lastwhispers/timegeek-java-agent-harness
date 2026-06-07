@@ -1,6 +1,8 @@
 package com.lastwhispers.harness.ch19.observability;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
+import com.alibaba.fastjson2.JSONWriter;
 import com.alibaba.fastjson2.annotation.JSONField;
 import lombok.extern.slf4j.Slf4j;
 
@@ -52,6 +54,10 @@ public class Trace {
 
         public String getName() { return name; }
         public Map<String, Object> getAttributes() { return attributes; }
+        public List<Span> getChildren() { return children; }
+        public String getStartTime() { return startTime; }
+        public String getEndTime() { return endTime; }
+        public long getDurationMs() { return durationMs; }
 
         /**
          * 为当前 Span 记录关键元数据。
@@ -69,6 +75,26 @@ public class Trace {
                 Instant.parse(startTime),
                 Instant.parse(endTime)
             ).toMillis();
+        }
+
+        /**
+         * 手动序列化 Span 树为 JSON，避免 fastjson2 过滤空集合/零值字段。
+         */
+        JSONObject toJson() {
+            JSONObject obj = new JSONObject();
+            obj.put("name", name);
+            obj.put("start_time", startTime);
+            obj.put("end_time", endTime);
+            obj.put("duration_ms", durationMs);
+            obj.put("attributes", new JSONObject(attributes));
+            if (!children.isEmpty()) {
+                List<JSONObject> childJson = new ArrayList<>(children.size());
+                for (Span child : children) {
+                    childJson.add(child.toJson());
+                }
+                obj.put("children", childJson);
+            }
+            return obj;
         }
     }
 
@@ -98,7 +124,7 @@ public class Trace {
             String filename = String.format("trace_%s_%d.json", sessionID, System.nanoTime());
             Path filePath = traceDir.resolve(filename);
 
-            String json = JSON.toJSONString(rootSpan);
+            String json = JSON.toJSONString(rootSpan.toJson(), JSONWriter.Feature.PrettyFormat);
             Files.writeString(filePath, json);
 
             log.info("[Tracing] 本次任务的执行回放链路已保存至: {}", filePath);
