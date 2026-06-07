@@ -13,37 +13,49 @@ import com.lastwhispers.harness.ch13.tools.*;
 import com.lastwhispers.harness.util.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * 【修改】下发长程任务，并开启 Plan Mode 测试
+ */
 @Slf4j
 public class Main {
     public static void main(String[] args) {
+        // 通过命令行参数接收用户的 prompt
+//        String prompt = parsePrompt(args);
+        String prompt = "我需要你搭建一个极简的 Java 语言 Web Server 项目。";
+        if (prompt == null || prompt.isEmpty()) {
+            log.info("用法: java Main -prompt \"你的任务指令\"");
+            System.exit(1);
+        }
+
         Dotenv.load();
 
-        String workDir = System.getProperty("user.dir") + "/workspace/ch12";
+        String workDir = System.getProperty("user.dir") + "/workspace/ch13";
         LLMProvider llmProvider = new DashScopeProvider();
 
+        // 挂载 4 大基础工具
         Registry registry = new RegistryImpl();
         registry.register(new ReadFileTool(workDir));
         registry.register(new WriteFileTool(workDir));
         registry.register(new BashTool(workDir));
+        registry.register(new EditFileTool(workDir));
 
-        // 实例化引擎，传入一个极小的 Compactor 阈值 (8000 字符) 用于测试 OOM 防护机制
-        ContextCompactor compactor = new ContextCompactor(8000, 6);
-        AgentEngine engine = new AgentEngine(llmProvider, registry, false, compactor);
+        // 实例化引擎并开启计划模式 (PlanMode=true)
+        ContextCompactor compactor = new ContextCompactor(80000, 6);
+        AgentEngine engine = new AgentEngine(llmProvider, registry, false, true, compactor);
         TerminalReporter reporter = new TerminalReporter();
 
-        String sessionID = "test_oom_protection_001";
+        // 使用一个固定的 SessionID，以便在多次运行之间共享基于内存的"短期工作记忆"。
+        // (在真实的 CLI 中，如果进程重启，Session 的内存历史其实是丢失的。
+        //  但这正是要演示的重点：即便短期内存丢失，只要 TODO.md 还在，任务就能继续！)
+        String sessionID = "task_web_server_01";
         Session session = SessionManager.INSTANCE.getOrCreate(sessionID, workDir);
 
-        // 发起一个会导致读取大文件的恶意任务
-        String prompt = """
-            请帮我执行以下三个步骤：
-            1. 使用 bash 执行 echo "开始排查日志"
-            2. 使用 read_file 工具读取当前目录下的巨大文件 mock_log.txt
-            3. 使用 bash 执行 date 命令获取当前时间，并告诉我任务全部完成。
-            """;
+        log.info("\n>>> 收到指令: {}", prompt);
 
+        // 将用户的 Prompt 压入 Session
         session.append(new Message(Role.USER, prompt));
 
+        // 唤醒引擎执行
         try {
             engine.run(session, reporter);
         } catch (Exception e) {
@@ -51,5 +63,17 @@ public class Main {
         }
 
         log.info("会话已结束。");
+    }
+
+    /**
+     * 简单的命令行参数解析，支持 -prompt "xxx" 格式
+     */
+    private static String parsePrompt(String[] args) {
+        for (int i = 0; i < args.length; i++) {
+            if ("-prompt".equals(args[i]) && i + 1 < args.length) {
+                return args[i + 1];
+            }
+        }
+        return null;
     }
 }

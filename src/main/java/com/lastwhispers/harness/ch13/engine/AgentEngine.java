@@ -29,16 +29,22 @@ public class AgentEngine {
     private final LLMProvider llmProvider;
     private final Registry registry;
     private final boolean enableThinking;
+    private final boolean planMode; // 【新增】计划模式开关
     private final ContextCompactor compactor;
 
     public AgentEngine(LLMProvider llmProvider, Registry registry, boolean enableThinking) {
-        this(llmProvider, registry, enableThinking, new ContextCompactor(80000, 6));
+        this(llmProvider, registry, enableThinking, false);
     }
 
-    public AgentEngine(LLMProvider llmProvider, Registry registry, boolean enableThinking, ContextCompactor compactor) {
+    public AgentEngine(LLMProvider llmProvider, Registry registry, boolean enableThinking, boolean planMode) {
+        this(llmProvider, registry, enableThinking, planMode, new ContextCompactor(80000, 6));
+    }
+
+    public AgentEngine(LLMProvider llmProvider, Registry registry, boolean enableThinking, boolean planMode, ContextCompactor compactor) {
         this.llmProvider = llmProvider;
         this.registry = registry;
         this.enableThinking = enableThinking;
+        this.planMode = planMode;
         this.compactor = compactor;
     }
 
@@ -50,7 +56,7 @@ public class AgentEngine {
         log.info("[Engine] 唤醒会话 [{}]，锁定工作区: {}", session.getId(), session.getWorkDir());
 
         // 根据当前 Session 的工作区，动态组装最新的 System Prompt
-        PromptComposer composer = new PromptComposer(session.getWorkDir());
+        PromptComposer composer = new PromptComposer(session.getWorkDir(), this.planMode);
         Message systemMsg = composer.build();
 
         while (true) {
@@ -64,6 +70,9 @@ public class AgentEngine {
             contextHistory.add(systemMsg);
             contextHistory.addAll(workingMemory);
 
+            // 用于存放本轮 Turn 合并后的思考内容
+            String currentTurnThinkingContent = "";
+
             // 2. ================= Phase 1: Thinking =================
             if (this.enableThinking) {
                 if (reporter != null) {
@@ -73,9 +82,9 @@ public class AgentEngine {
                     List<Message> compactedContext = this.compactor.compact(contextHistory);
                     Message thinkResp = this.llmProvider.generate(compactedContext, null);
                     if (thinkResp != null && StringUtils.isNotBlank(thinkResp.getContent())) {
-                        // 将思考过程持久化到 Session 中！
-                        session.append(thinkResp);
-                        // 把它追加到当前这一轮的临时上下文中，供 Action 阶段使用
+                        // 【修改点】：思考内容暂存，先不 Append 到 session
+                        currentTurnThinkingContent = thinkResp.getContent();
+                        // 为了让 Phase 2 能看到刚才的思考，临时加入 contextHistory
                         contextHistory.add(thinkResp);
                     }
                 } catch (Exception e) {
@@ -92,9 +101,16 @@ public class AgentEngine {
                 throw new RuntimeException("Action 阶段生成失败: " + e.getMessage(), e);
             }
 
-            // 将大模型的行动响应持久化到 Session 中
-            session.append(actionResp);
-            contextHistory.add(actionResp);
+            // 【核心修正】：合并 Thinking 和 Action 的内容，构造一条唯一的、合规的 Assistant 消息
+            String mergedContent = StringUtils.trim(currentTurnThinkingContent + "\n" + actionResp.getContent());
+            Message finalAssistantMsg = new Message();
+            finalAssistantMsg.setRole(Role.ASSISTANT);
+            finalAssistantMsg.setContent(mergedContent);
+            finalAssistantMsg.setToolCalls(actionResp.getToolCalls());
+
+            // 将合并后的合规消息持久化到 Session 中
+            session.append(finalAssistantMsg);
+            contextHistory.add(finalAssistantMsg);
 
             if (StringUtils.isNotBlank(actionResp.getContent()) && reporter != null) {
                 reporter.onMessage(actionResp.getContent());

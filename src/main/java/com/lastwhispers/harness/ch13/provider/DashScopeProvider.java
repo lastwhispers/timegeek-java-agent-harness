@@ -138,7 +138,7 @@ public class DashScopeProvider implements LLMProvider {
         }
 
         String jsonBody = body.toJSONString();
-        log.debug("[DashScopeProvider] Request body: {}", jsonBody);
+//        log.debug("[DashScopeProvider] Request body: {}", jsonBody);
 
         Request request = new Request.Builder()
                 .url(baseUrl + "/chat/completions")
@@ -154,7 +154,7 @@ public class DashScopeProvider implements LLMProvider {
             }
 
             String respBody = response.body().string();
-            log.debug("[DashScopeProvider] Response body: {}", respBody);
+//            log.debug("[DashScopeProvider] Response body: {}", respBody);
             JSONObject root = JSON.parseObject(respBody);
 
             JSONArray choices = root.getJSONArray("choices");

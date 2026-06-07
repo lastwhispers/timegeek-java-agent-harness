@@ -19,7 +19,7 @@ public class Main {
         Dotenv.load();
 
         // 1. 获取工作区物理边界
-        String workDir = System.getProperty("user.dir");
+        String workDir = System.getProperty("user.dir")+"/workspace/ch06";
 
         // 2. 初始化真实的大脑 (API_KEY 和 MODEL 由 Provider 内部自动加载)
         LLMProvider llmProvider = new DashScopeProvider();
