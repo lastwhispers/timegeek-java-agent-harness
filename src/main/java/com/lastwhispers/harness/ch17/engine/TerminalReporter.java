@@ -13,24 +13,24 @@ public class TerminalReporter implements Reporter {
 
     @Override
     public void onToolCall(String toolName, String args) {
-        log.info("🛠️ [调用工具] {}", toolName);
+        log.info("🛠️ [调用工具] toolName:{}", toolName);
         // 清理参数中的换行符和特殊字符
         String displayArgs = args.replace("\n", "\\n").replace("\r", "\\r");
         if (displayArgs.length() > 150) {
             displayArgs = displayArgs.substring(0, 150) + "... (已截断)";
         }
-        log.info("   参数: {}", displayArgs);
+        log.info("  toolName:{} 参数: {}",toolName, displayArgs);
     }
 
     @Override
     public void onToolResult(String toolName, String result, boolean isError) {
         if (isError) {
-            log.info("❌ [执行失败] {}", toolName);
+            log.info("❌ [执行失败] toolName:{}", toolName);
             if (StringUtils.isNotEmpty(result)) {
                 log.info("   错误: {}", result);
             }
         } else {
-            log.info("✅ [执行成功] {}", toolName);
+            log.info("✅ [执行成功] toolName:{} ,result:{}", toolName,result);
         }
     }
 

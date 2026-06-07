@@ -23,7 +23,7 @@ import java.util.concurrent.Executors;
  * 【注意】：我们移除了 Engine 层级的 workDir，因为 workDir 现在应该跟随 Session 走！
  */
 @Slf4j
-public class AgentEngine {
+public class AgentEngine implements AgentRunner {
 
     private static final int DEFAULT_WORKING_MEMORY_LIMIT = 6;
 
@@ -190,6 +190,106 @@ public class AgentEngine {
             if (reminderMsg != null) {
                 session.append(reminderMsg);
             }
+        }
+    }
+
+    /**
+     * RunSub 是专为 Subagent 拉起的一次性受限循环。
+     * 不依赖外部 Session，打完就跑。
+     * Reporter 用于让终端用户看到子智能体的工作轨迹。
+     */
+    @Override
+    public String runSub(String taskPrompt, Registry readOnlyRegistry, Reporter reporter) {
+
+        // 【核心优化】：子智能体极其容易偷懒，必须在 System Prompt 中严厉警告它必须使用工具！
+        List<Message> contextHistory = new ArrayList<>();
+        contextHistory.add(new Message(Role.SYSTEM, """
+            你是一个专门负责深度探索的探路者 (Explorer Subagent)。
+            你的任务是根据主架构师的指令，在当前工作区内仔细阅读代码、查阅日志，搜集足够的信息。
+
+            【核心纪律】
+            1. 你必须、且只能依靠内置工具（如 bash 的 find/grep，或 read_file）去寻找答案。绝对不允许凭空捏造或猜测！
+            2. 如果你没有找到确切的答案，你必须继续使用工具深入搜索。
+            3. 当且仅当你找到了确切的线索后，停止调用工具，直接输出一段纯文本作为你的终极汇报。主架构师会根据你的汇报来做下一步决策。
+            """));
+        contextHistory.add(new Message(Role.USER, taskPrompt));
+
+        // 限制子智能体最多只能跑 10 个 Turn，防止它自己卡死
+        final int maxSubTurns = 10;
+        int turnCount = 0;
+
+        while (true) {
+            turnCount++;
+            if (turnCount > maxSubTurns) {
+                throw new RuntimeException(String.format(
+                    "子智能体探索过于深入，超过 %d 轮被强制召回，请主 Agent 给它更明确的指令", maxSubTurns));
+            }
+
+            // 【驾驭底线】：子智能体仅能获取传入的只读工具注册表
+            List<ToolDefinition> availableTools = readOnlyRegistry.getAvailableTools();
+
+            List<Message> compactedContext = this.compactor.compact(contextHistory);
+
+            // 子任务要求急速响应，强制关闭主体的慢思考，直接预测行动
+            Message actionResp;
+            try {
+                actionResp = this.llmProvider.generate(compactedContext, availableTools);
+            } catch (Exception e) {
+                throw new RuntimeException("子智能体推理失败: " + e.getMessage(), e);
+            }
+
+            contextHistory.add(actionResp);
+
+            // 【核心退出条件】：子智能体一旦不调用工具了，说明它做好了总结汇报
+            if (CollectionUtils.isEmpty(actionResp.getToolCalls())) {
+                return actionResp.getContent();
+            }
+
+            // 执行只读工具的并发循环
+            int callCount = actionResp.getToolCalls().size();
+            List<Message> observationMsgs = new ArrayList<>(callCount);
+            for (int i = 0; i < callCount; i++) {
+                observationMsgs.add(null);
+            }
+
+            try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                List<CompletableFuture<Void>> futures = new ArrayList<>();
+
+                for (int i = 0; i < callCount; i++) {
+                    final int idx = i;
+                    final ToolCall call = actionResp.getToolCalls().get(i);
+
+                    CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                        // 【可视化关键】：让终端用户看到 Subagent 正在做什么
+                        if (reporter != null) {
+                            reporter.onToolCall("[Subagent] " + call.getName(), call.getArguments());
+                        }
+
+                        ToolResult result = readOnlyRegistry.execute(call);
+
+                        String finalOutput = result.getOutput();
+                        if (result.isError()) {
+                            finalOutput = this.recovery.analyzeAndInject(call.getName(), result.getOutput());
+                        }
+
+                        if (reporter != null) {
+                            String display = finalOutput;
+                            if (display.length() > 200) {
+                                display = display.substring(0, 200) + "... (已截断)";
+                            }
+                            reporter.onToolResult("[Subagent] " + call.getName(), display, result.isError());
+                        }
+
+                        observationMsgs.set(idx, new Message(Role.USER, finalOutput, call.getId()));
+                    }, executor);
+
+                    futures.add(future);
+                }
+
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            }
+
+            contextHistory.addAll(observationMsgs);
         }
     }
 }

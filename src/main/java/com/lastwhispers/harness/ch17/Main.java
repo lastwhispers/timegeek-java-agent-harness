@@ -4,8 +4,6 @@ import com.lastwhispers.harness.ch17.context.Session;
 import com.lastwhispers.harness.ch17.context.SessionManager;
 import com.lastwhispers.harness.ch17.engine.AgentEngine;
 import com.lastwhispers.harness.ch17.engine.TerminalReporter;
-import com.lastwhispers.harness.ch17.feishu.ApprovalManager;
-import com.lastwhispers.harness.ch17.feishu.CommandSafetyChecker;
 import com.lastwhispers.harness.ch17.provider.DashScopeProvider;
 import com.lastwhispers.harness.ch17.provider.LLMProvider;
 import com.lastwhispers.harness.ch17.schema.Message;
@@ -15,53 +13,46 @@ import com.lastwhispers.harness.util.Dotenv;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * 【修改】注册审批 Middleware，验证高危操作人工审批流程
+ * 【修改】挂载 subagent 工具，发起多智能体协同任务
  */
 @Slf4j
 public class Main {
     public static void main(String[] args) {
         Dotenv.load();
 
-        String workDir = System.getProperty("user.dir") + "/workspace";
+        String workDir = System.getProperty("user.dir") + "/workspace/ch17";
         LLMProvider llmProvider = new DashScopeProvider();
-
-        // 挂载 4 大基础工具
-        Registry registry = new RegistryImpl();
-        registry.register(new ReadFileTool(workDir));
-        registry.register(new WriteFileTool(workDir));
-        registry.register(new BashTool(workDir));
-        registry.register(new EditFileTool(workDir));
-
-        // 关闭 Plan 模式，专注于见证审批拦截过程
-        AgentEngine engine = new AgentEngine(llmProvider, registry, false, false);
-
-        // 【核心注入】注册安全拦截 Middleware
-        registry.use(call -> {
-            String argsStr = call.getArguments();
-            if (CommandSafetyChecker.isDangerousCommand(call.getName(), argsStr)) {
-                String taskId = call.getId();
-                ApprovalManager.ApprovalResult result = ApprovalManager.INSTANCE.waitForApproval(
-                    taskId, call.getName(), argsStr, new TerminalReporter()
-                );
-                if (!result.allowed()) {
-                    return Registry.MiddlewareResult.deny(result.reason());
-                }
-                return Registry.MiddlewareResult.allow();
-            }
-            return Registry.MiddlewareResult.allow();
-        });
-
         TerminalReporter reporter = new TerminalReporter();
 
-        String sessionID = "test_command_intercept_001";
+        // 【防御沙箱】为子智能体准备受限的只读注册表
+        Registry readOnlyRegistry = new RegistryImpl();
+        readOnlyRegistry.register(new ReadFileTool(workDir));
+        readOnlyRegistry.register(new BashTool(workDir)); // 允许简单的 grep 等搜索操作
+
+        // 为主智能体准备全功能注册表
+        Registry mainRegistry = new RegistryImpl();
+        mainRegistry.register(new ReadFileTool(workDir));
+        mainRegistry.register(new WriteFileTool(workDir));
+        mainRegistry.register(new BashTool(workDir));
+        mainRegistry.register(new EditFileTool(workDir));
+
+        // 初始化主引擎
+        AgentEngine engine = new AgentEngine(llmProvider, mainRegistry, false, false);
+
+        // 【核心装配】：将带有 Engine 引用和只读 Registry 的 Subagent 工具注册进主线
+        mainRegistry.register(new SubagentTool(engine, readOnlyRegistry, reporter));
+
+        String sessionID = "test_subagent_001";
         Session session = SessionManager.INSTANCE.getOrCreate(sessionID, workDir);
 
-        // 诱发高危命令检测的提示词
         String prompt = """
-                请帮我删除当前目录下所有以 .tmp 结尾的临时文件，使用 rm -r 命令。
-                """;
+                我需要你在这个遗留项目里，找到那个"核心密码"。
+                为了防止污染主上下文，请你务必派出子智能体（spawn_subagent）去执行探索任务。
+                你可以让子智能体使用 bash 去查找当前目录（及其所有子目录）下名为 config.txt 的文件。
+                子智能体拿到密码向你汇报后，请你亲自使用 write_file 工具，将密码写在根目录的 answer.txt 里。
+                """+",当前目录为"+workDir;
 
-        log.info("\n>>> 启动审批拦截测试...");
+        log.info("\n>>> 启动多智能体协同测试...");
 
         // 将用户的 Prompt 压入 Session
         session.append(new Message(Role.USER, prompt));
