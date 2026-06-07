@@ -21,7 +21,7 @@ public class Main {
     public static void main(String[] args) {
         Dotenv.load();
 
-        String workDir = System.getProperty("user.dir") + "/workspace/ch18";
+        String workDir = System.getProperty("user.dir") + "/workspace/ch17";
 
         // 【核心注入】将 Provider 包装进 Tracker 装饰器
         Tracker tracker = new Tracker(new DashScopeProvider());
