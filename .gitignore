@@ -38,6 +38,3 @@ build/
 
 ### Claude Code ###
 .claude/
-
-### Workspace Sandbox ###
-workspace/
